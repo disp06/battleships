@@ -1,0 +1,7 @@
+build/
+*.vpk
+*.velf
+*.elf
+eboot.bin
+param.sfo
+tests/host_sim/bs_sim
