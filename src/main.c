@@ -491,6 +491,14 @@ static void update_network(void)
 
     net_update();
 
+    if (net_state() == NET_CANCELLED) {          /* backed out of the system dialog */
+        net_leave();
+        g.trans_active = 0; g.trans_t = 0;
+        g.state = ST_MODE_SELECT;
+        g.state_time = 0;
+        return;
+    }
+
     /* Opponent leaving after the match is already decided is not an error:
      * keep the result on screen and just disable REMATCH. */
     if (g.state == ST_GAMEOVER || (g.state == ST_BATTLE && g.match_over)) {
@@ -601,6 +609,7 @@ static void build_lobby_info(void)
     case NET_JOINING:   snprintf(g_lobby_status, sizeof(g_lobby_status), "Requesting to join %s...", net_peer_nick()); break;
     case NET_LINKING:   snprintf(g_lobby_status, sizeof(g_lobby_status), "Linking with %s...", net_peer_nick()); break;
     case NET_CONNECTED: snprintf(g_lobby_status, sizeof(g_lobby_status), "Connected to %s", net_peer_nick()); break;
+    case NET_STARTING:  snprintf(g_lobby_status, sizeof(g_lobby_status), "Joining the Ad-Hoc network..."); break;
     default:            snprintf(g_lobby_status, sizeof(g_lobby_status), "Starting Ad-Hoc..."); break;
     }
     if (g.state == ST_LOBBY_JOIN && (ns == NET_SCANNING || ns == NET_JOINING)) {
@@ -787,8 +796,13 @@ int main(int argc, char *argv[])
         input_poll(&in);
         update_transition(dt);
         update_network();
+        if (net_dialog_active() && g.state != ST_LOBBY_HOST && g.state != ST_LOBBY_JOIN)
+            net_update();                  /* finish an aborted dialog from anywhere */
+        g.sys_dialog = net_dialog_active();
 
-        if (g.alert_active) {
+        if (g.sys_dialog) {
+            /* the system dialog owns the buttons while it is open */
+        } else if (g.alert_active) {
             update_alert(&in);
         } else if (!g.trans_active) {
             switch (g.state) {

@@ -953,5 +953,6 @@ void render_frame(const App *a, float dt)
     }
 
     vita2d_end_drawing();
+    if (a->sys_dialog) vita2d_common_dialog_update();   /* system NetCheck dialog */
     vita2d_swap_buffers();
 }

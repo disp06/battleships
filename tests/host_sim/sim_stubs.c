@@ -31,8 +31,8 @@
 #include <psp2/net/net.h>
 #include <psp2/net/netctl.h>
 #include <psp2/net/adhoc_matching.h>
-#include <psp2/pspnet_adhoc.h>
-#include <psp2/pspnet_adhocctl.h>
+#include <psp2/netcheck_dialog.h>
+#include <psp2/common_dialog.h>
 #include <vita2d.h>
 
 #define SPEED 10
@@ -156,26 +156,39 @@ int vita2d_pgf_text_width(vita2d_pgf *f, float s, const char *t) { (void)f; retu
 
 /* ======================================================= net emulation */
 static const char *role(void) { const char *r = getenv("BS_ROLE"); return r ? r : "single"; }
-static int is_host(void) { return !strcmp(role(), "host"); }
 
 int sceNetInit(SceNetInitParam *p) { (void)p; return 0; }
 int sceNetTerm(void) { return 0; }
 int sceNetCtlInit(void) { return 0; }
 void sceNetCtlTerm(void) {}
-int sceNetAdhocInit(void) { return 0; }
-int sceNetAdhocTerm(void) { return 0; }
-int sceNetAdhocctlInit(const SceNetAdhocctlAdhocId *id)
+
+/* ---- Ad-Hoc link via the NetCheck dialog ---- */
+static int g_adhoc_up, g_dialog_status, g_dialog_frames;
+int g_sim_dialog_inits;
+SceInt32 sceNetCheckDialogInit(SceNetCheckDialogParam *p)
 {
-    if (memcmp(id->data, "BTLSHP001", 9) != 0) return -1;
+    if (p->mode != SCE_NETCHECK_DIALOG_MODE_ADHOC_CONN) return (int)SCE_NETCHECK_DIALOG_ERROR_INVALID_MODE;
+    g_sim_dialog_inits++;
+    g_dialog_status = SCE_COMMON_DIALOG_STATUS_RUNNING;
+    g_dialog_frames = 0;
     return 0;
 }
-int sceNetAdhocctlTerm(void) { return 0; }
-int sceNetAdhocctlGetEtherAddr(SceNetEtherAddr *a)
+SceCommonDialogStatus sceNetCheckDialogGetStatus(void)
 {
-    memset(a, 0, sizeof(*a));
-    a->data[5] = is_host() ? 0x01 : 0x02;
-    return 0;
+    if (g_dialog_status == SCE_COMMON_DIALOG_STATUS_RUNNING && ++g_dialog_frames > 20) {
+        g_dialog_status = SCE_COMMON_DIALOG_STATUS_FINISHED;
+        g_adhoc_up = 1;
+    }
+    return (SceCommonDialogStatus)g_dialog_status;
 }
+SceInt32 sceNetCheckDialogAbort(void) { g_dialog_status = SCE_COMMON_DIALOG_STATUS_FINISHED; return 0; }
+SceInt32 sceNetCheckDialogGetResult(SceNetCheckDialogResult *r) { memset(r, 0, sizeof(*r)); r->result = SCE_COMMON_DIALOG_RESULT_OK; return 0; }
+SceInt32 sceNetCheckDialogTerm(void) { g_dialog_status = SCE_COMMON_DIALOG_STATUS_NONE; return 0; }
+int vita2d_common_dialog_update(void) { return 0; }
+int sceNetCtlAdhocGetState(int *st) { *st = g_adhoc_up ? SCE_NETCTL_STATE_CONNECTED : SCE_NETCTL_STATE_DISCONNECTED; return 0; }
+int sceNetCtlAdhocDisconnect(void) { g_adhoc_up = 0; return 0; }
+void *sceClibMemset(void *d, int c, SceSize n) { return memset(d, c, n); }
+unsigned short int sceNetHtons(unsigned short int v) { return (unsigned short)((v >> 8) | (v << 8)); }
 
 /* ---- matching over UNIX datagrams ---- */
 #define SOCK_PARENT "/tmp/bssim_parent.sock"
@@ -276,59 +289,70 @@ int sceNetAdhocMatchingStop(int id)
 }
 int sceNetAdhocMatchingDelete(int id) { (void)id; if (m_fd >= 0) close(m_fd); m_fd = -1; return 0; }
 
-/* ---- PTP over a UNIX stream socket ---- */
-int sceNetAdhocPtpListen(const SceNetEtherAddr *s, SceUShort16 p, unsigned int b, unsigned int ri, int rc, int bl, int f)
+/* ---- STREAM_P2P sockets over a UNIX stream socket ---- */
+static int g_rcvto[1024], g_sndto[1024];
+static int wait_fd(int fd, short ev, int to_us)
 {
-    struct sockaddr_un a;
-    int fd = socket(AF_UNIX, SOCK_STREAM, 0);
-    (void)s; (void)p; (void)b; (void)ri; (void)rc; (void)f;
-    memset(&a, 0, sizeof(a)); a.sun_family = AF_UNIX; strcpy(a.sun_path, SOCK_PTP);
-    unlink(SOCK_PTP);
-    if (bind(fd, (struct sockaddr *)&a, sizeof(a)) < 0 || listen(fd, bl) < 0) return -1;
-    return fd;
+    struct pollfd pf = { fd, ev, 0 };
+    int ms = to_us > 0 ? to_us / 1000 / SPEED + 1 : -1;
+    return poll(&pf, 1, ms);
 }
-int sceNetAdhocPtpAccept(int id, SceNetEtherAddr *addr, SceUShort16 *port, unsigned int timeout, int flag)
+int sceNetSocket(const char *name, int domain, int type, int protocol)
 {
-    struct pollfd pf = { id, POLLIN, 0 };
-    (void)addr; (void)port; (void)flag;
-    if (poll(&pf, 1, (int)(timeout / 1000 / SPEED) + 1) <= 0) return (int)SCE_ERROR_NET_ADHOC_TIMEOUT;
-    return accept(id, NULL, NULL);
-}
-int sceNetAdhocPtpOpen(const SceNetEtherAddr *s, SceUShort16 sp, const SceNetEtherAddr *d, SceUShort16 dp,
-                       unsigned int b, unsigned int ri, int rc, int f)
-{
-    (void)s; (void)sp; (void)d; (void)dp; (void)b; (void)ri; (void)rc; (void)f;
+    (void)name; (void)domain; (void)protocol;
+    if (type != SCE_NET_SOCK_STREAM_P2P) return -1;
     return socket(AF_UNIX, SOCK_STREAM, 0);
 }
-int sceNetAdhocPtpConnect(int id, unsigned int timeout, int flag)
+int sceNetSetsockopt(int s, int level, int opt, const void *val, unsigned int len)
+{
+    (void)level; (void)len;
+    if (opt == SCE_NET_SO_RCVTIMEO) g_rcvto[s] = *(const int *)val;
+    if (opt == SCE_NET_SO_SNDTIMEO) g_sndto[s] = *(const int *)val;
+    return 0;
+}
+int sceNetBind(int s, const SceNetSockaddr *addr, unsigned int len)
 {
     struct sockaddr_un a;
-    (void)flag;
+    (void)addr; (void)len;
     memset(&a, 0, sizeof(a)); a.sun_family = AF_UNIX; strcpy(a.sun_path, SOCK_PTP);
-    if (connect(id, (struct sockaddr *)&a, sizeof(a)) == 0) { DBG("ptp connected"); return 0; }
-    DBG("ptp connect failed errno %d", errno);
-    vsleep(timeout);
-    return (int)SCE_ERROR_NET_ADHOC_TIMEOUT;
+    unlink(SOCK_PTP);
+    return bind(s, (struct sockaddr *)&a, sizeof(a)) < 0 ? -1 : 0;
 }
-int sceNetAdhocPtpSend(int id, const void *data, int *len, unsigned int timeout, int flag)
+int sceNetListen(int s, int backlog) { return listen(s, backlog) < 0 ? -1 : 0; }
+int sceNetAccept(int s, SceNetSockaddr *addr, unsigned int *len)
+{
+    int r = wait_fd(s, POLLIN, g_rcvto[s]);
+    (void)addr; (void)len;
+    if (r == 0) return (int)SCE_NET_ERROR_EAGAIN;
+    if (r < 0) return (int)SCE_NET_ERROR_EINTR;
+    r = accept(s, NULL, NULL);
+    return r < 0 ? (int)SCE_NET_ERROR_ECONNRESET : r;
+}
+int sceNetConnect(int s, const SceNetSockaddr *name, unsigned int len)
+{
+    struct sockaddr_un a;
+    const SceNetSockaddrIn *in = (const SceNetSockaddrIn *)name;
+    (void)len;
+    if (in->sin_port != sceNetHtons(SCE_NET_ADHOC_PORT) || in->sin_vport == 0) return (int)SCE_NET_ERROR_EINVAL;
+    memset(&a, 0, sizeof(a)); a.sun_family = AF_UNIX; strcpy(a.sun_path, SOCK_PTP);
+    if (connect(s, (struct sockaddr *)&a, sizeof(a)) == 0) return 0;
+    return (int)SCE_NET_ERROR_ECONNREFUSED;
+}
+int sceNetSend(int s, const void *msg, unsigned int len, int flags)
 {
     ssize_t r;
-    (void)timeout; (void)flag;
-    r = send(id, data, (size_t)*len, MSG_NOSIGNAL);
-    if (r < 0) return (int)SCE_ERROR_NET_ADHOC_DISCONNECTED;
-    *len = (int)r;
-    return 0;
+    (void)flags;
+    r = send(s, msg, len, MSG_NOSIGNAL);
+    return r < 0 ? (int)SCE_NET_ERROR_ECONNRESET : (int)r;
 }
-int sceNetAdhocPtpRecv(int id, void *buf, int *len, unsigned int timeout, int flag)
+int sceNetRecv(int s, void *buf, unsigned int len, int flags)
 {
-    struct pollfd pf = { id, POLLIN, 0 };
+    int w = wait_fd(s, POLLIN, g_rcvto[s]);
     ssize_t r;
-    (void)flag;
-    if (poll(&pf, 1, (int)(timeout / 1000 / SPEED) + 1) <= 0) return (int)SCE_ERROR_NET_ADHOC_TIMEOUT;
-    r = recv(id, buf, (size_t)*len, 0);
-    if (r <= 0) return (int)SCE_ERROR_NET_ADHOC_DISCONNECTED;
-    *len = (int)r;
-    return 0;
+    (void)flags;
+    if (w == 0) return (int)SCE_NET_ERROR_EAGAIN;
+    r = recv(s, buf, len, 0);
+    return r < 0 ? (int)SCE_NET_ERROR_ECONNRESET : (int)r;
 }
-int sceNetAdhocPtpFlush(int id, unsigned int t, int f) { (void)id; (void)t; (void)f; return 0; }
-int sceNetAdhocPtpClose(int id, int flag) { (void)flag; return close(id); }
+int sceNetSocketAbort(int s, int flags) { (void)flags; shutdown(s, SHUT_RDWR); return 0; }
+int sceNetSocketClose(int s) { return close(s); }

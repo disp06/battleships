@@ -1,13 +1,12 @@
 /*
- * adhoc_net.h - PS Vita Ad-Hoc layer: discovery/handshake via
- * SceNetAdhocMatching, game traffic via reliable PTP sockets.
+ * adhoc_net.h - PS Vita native Ad-Hoc layer: NetCheck dialog for the link,
+ * SceNetAdhocMatching for discovery, STREAM_P2P socket for game traffic.
  */
 #ifndef BS_ADHOC_NET_H
 #define BS_ADHOC_NET_H
 
 #include <stdint.h>
 
-#define NET_ADHOC_ID     "BTLSHP001"   /* 9-char Ad-Hoc product ID (== TITLE_ID) */
 #define NET_MAX_HOSTS    8
 #define NET_NICK_LEN     32
 
@@ -22,7 +21,7 @@ typedef enum {
     PKT_PING    = 0x07    /* keep-alive                                */
 } PacketType;
 
-#define NET_PROTO_VERSION 1
+#define NET_PROTO_VERSION 2
 #define NET_PKT_SIZE      8
 
 typedef struct {
@@ -34,6 +33,8 @@ typedef struct {
 typedef enum {
     NET_OFF = 0,          /* not initialised                       */
     NET_IDLE,             /* stack up, nothing running             */
+    NET_STARTING,         /* system Ad-Hoc dialog is on screen     */
+    NET_CANCELLED,        /* user backed out of the system dialog  */
     NET_HOSTING,          /* waiting for a challenger              */
     NET_SCANNING,         /* listening for hosts                   */
     NET_JOINING,          /* request sent, waiting for host        */
@@ -52,6 +53,7 @@ int         net_init(void);                 /* lazily brings up sceNet/Ad-Hoc; 0
 void        net_shutdown(void);
 int         net_host(const char *nickname);
 int         net_scan(const char *nickname);
+int         net_dialog_active(void);        /* system NetCheck dialog needs drawing */
 int         net_host_count(void);
 const NetHost *net_host_get(int i);
 int         net_join(int index);

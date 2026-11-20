@@ -90,24 +90,21 @@ Copy `build/Battleship.vpk` to `ux0:` using VitaShell (USB or FTP). Then press â
 4. Both players place their fleets and press READY. The host fires first.
 5. After the game, both players press REMATCH, or either can return to the menu.
 
+When you choose Host or Join, the Vita's own **Ad-Hoc connection dialog** appears first. That dialog puts the console on the Ad-Hoc network. Without it, every Ad-Hoc call fails with `0x80412108` (`SCE_NET_CTL_ERROR_NOT_CONNECTED`).
+
 **How the network code works**
 
 | Layer | What it does |
 |---|---|
-| `sceNetAdhocctlInit` | uses product ID `BTLSHP001`, so only consoles running this game see each other |
-| Matching (PARENT/CHILD) | the host's hello-opt carries `{magic "BSHP", version, MAC, nickname}`; the joiner sends the same block back in `SelectTarget` |
-| PTP | the host listens on port `0x5342` and the joiner connects to the host MAC from the hello. All traffic runs on a worker thread, so the 60 FPS loop never blocks |
+| Link | `sceNetCheckDialogInit` in `SCE_NETCHECK_DIALOG_MODE_ADHOC_CONN` mode, drawn with `vita2d_common_dialog_update()`. Leaving the lobby calls `sceNetCtlAdhocDisconnect()` |
+| Matching (PARENT/CHILD) | the host's hello-opt carries `{magic "BSHP", version, nickname}`; the joiner sends the same block back in `SelectTarget`. The host's Ad-Hoc IP comes from the matching event |
+| Game socket | `SCE_NET_SOCK_STREAM_P2P` on port `SCE_NET_ADHOC_PORT` (3658) with virtual port 3000. The host listens and the joiner connects. All traffic runs on a worker thread, so the 60 FPS loop never blocks |
 | Packets (8 bytes) | `HELLO`, `READY`, `FIRE(x,y)`, `RESULT(x,y,status, sunk x,y,len,horiz)`, `REMATCH`, `QUIT`, `PING` (keep-alive once per second) |
-| Disconnects | PTP errors, a matching BYE/LEAVE, or 8 s without any packet show an alert and return you to the main menu. If the opponent quits after the result is decided, the result screen stays up and only REMATCH is disabled |
+| Disconnects | socket errors, a matching BYE/LEAVE, or 8 s without any packet show an alert and return you to the main menu. If the opponent quits after the result is decided, the result screen stays up and only REMATCH is disabled |
 
-### âš  Not yet tested on real hardware
+v1.00 used the PSP-compatibility layer (`pspnet_adhoc` PTP). That layer only works on a PSP-mode Ad-Hoc network, so it was replaced in v1.01.
 
-The project compiles cleanly against the current `vita-headers` and `libvita2d` for ARMv7. The real game code (main.c, adhoc_net.c and the rest) was also run on Linux with the Vita APIs stubbed out. That covered single-player, a two-process Ad-Hoc match with rematches, a quit after the game is decided, and a console powering off mid-battle. It did **not** run on a Vita. These Ad-Hoc details come from the PSP SDK and the headers, and only a real console can confirm them:
-
-- **Matching event codes.** They are assumed to match the PSP: 1 = HELLO, 2 = REQUEST, 7 = ESTABLISHED, 10 = BYE, and so on (`MEV_*` in `adhoc_net.c`).
-- **The Ad-Hoc link.** The code assumes the system creates or joins the Ad-Hoc link itself once `sceNetAdhocctlInit` has run with a product ID. The public NID database exports no create/connect call.
-
-If something fails, the error dialog shows the failing call and its `0x8041xxxx` code. That code points to the exact step.
+If something fails, the error dialog shows the failing call and its `0x8041xxxx` code.
 
 ## Single-player AI
 

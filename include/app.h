@@ -45,6 +45,7 @@ typedef struct {
     int      trans_dir;            /* +1 out, -1 in               */
     AppState trans_next;
 
+    int      sys_dialog;           /* a system common dialog is open */
     char     nick[32];
     char     peer_nick[32];
 

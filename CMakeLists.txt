@@ -15,8 +15,8 @@ project(Battleship C)
 include("$ENV{VITASDK}/share/vita.cmake" REQUIRED)
 
 set(VITA_APP_NAME "Battleship")
-set(VITA_TITLEID  "BTLSHP001")      # 9 chars - also used as the Ad-Hoc product ID
-set(VITA_VERSION  "01.00")
+set(VITA_TITLEID  "BTLSHP001")      # 9 chars
+set(VITA_VERSION  "01.01")
 
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -O2 -ffast-math")
@@ -55,7 +55,6 @@ target_link_libraries(${PROJECT_NAME}
   ScePower_stub
   SceNet_stub
   SceNetCtl_stub
-  ScePspnetAdhoc_stub
   SceNetAdhocMatching_stub
   SceKernelThreadMgr_stub
   SceProcessmgr_stub
